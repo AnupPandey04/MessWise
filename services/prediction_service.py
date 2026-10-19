@@ -6,32 +6,34 @@ from sklearn.metrics import mean_absolute_error
 
 from database.connection import db
 
-MODEL_NAME = "random_forest_v1"
 MEAL_CODES = {"breakfast": 0, "lunch": 1, "dinner": 2}
 FEATURES = ["day_of_week", "is_weekend", "meal_code"]
+MODEL_NAME = "random_forest_v1"
 
 
 def load_data():
-    """Read historical attendance from MongoDB."""
+    """Load attendance records and prepare model features."""
     records = list(
         db.attendance.find(
             {},
             {"_id": 0, "date": 1, "meal_type": 1, "actual_count": 1},
         ).sort("date", 1)
     )
+
     if not records:
-        raise ValueError("No attendance data. Run database.seed_data first.")
+        raise ValueError("No attendance data found. Run database.seed_data first.")
 
     data = pd.DataFrame(records)
     data["date"] = pd.to_datetime(data["date"])
     data["day_of_week"] = data["date"].dt.dayofweek
     data["is_weekend"] = (data["day_of_week"] >= 5).astype(int)
     data["meal_code"] = data["meal_type"].map(MEAL_CODES)
+
     return data
 
 
 def build_model():
-    """Create a Random Forest regression model."""
+    """Create the Random Forest model."""
     return RandomForestRegressor(
         n_estimators=100,
         max_depth=5,
@@ -40,24 +42,26 @@ def build_model():
 
 
 def evaluate_model(data):
-    """Train on earlier dates and evaluate on the latest seven days."""
+    """Evaluate the model on the latest seven calendar days."""
     cutoff = data["date"].max().normalize() - pd.Timedelta(days=6)
     train = data[data["date"] < cutoff]
     test = data[data["date"] >= cutoff]
 
     if train.empty or test.empty:
-        raise ValueError("Not enough historical records to evaluate the model.")
+        raise ValueError("Not enough historical data to evaluate the model.")
 
     model = build_model()
     model.fit(train[FEATURES], train["actual_count"])
-    predicted = model.predict(test[FEATURES])
+    predictions = model.predict(test[FEATURES])
 
-    model_mae = mean_absolute_error(test["actual_count"], predicted)
+    model_mae = mean_absolute_error(test["actual_count"], predictions)
 
-    # baseline: use the training average for each meal type.
-    meal_average = train.groupby("meal_type")["actual_count"].mean()
-    baseline = test["meal_type"].map(meal_average)
-    baseline_mae = mean_absolute_error(test["actual_count"], baseline)
+    # Baseline: predict the training average for each meal type.
+    meal_averages = train.groupby("meal_type")["actual_count"].mean()
+    baseline_predictions = test["meal_type"].map(meal_averages)
+    baseline_mae = mean_absolute_error(
+        test["actual_count"], baseline_predictions
+    )
 
     improvement = (
         (baseline_mae - model_mae) / baseline_mae * 100
@@ -73,16 +77,10 @@ def evaluate_model(data):
         "model_mae": round(float(model_mae), 2),
         "baseline_mae": round(float(baseline_mae), 2),
         "improvement_percent": round(float(improvement), 2),
-        "result": (
-            "Random Forest performed better"
-            if model_mae < baseline_mae
-            else "Baseline performed better or equally"
-        ),
         "test_start_date": test["date"].min().to_pydatetime(),
         "test_end_date": test["date"].max().to_pydatetime(),
     }
 
-    # Store the latest evaluation instead of adding duplicate documents.
     db.model_evaluations.update_one(
         {"evaluation_name": "latest"},
         {"$set": result},
@@ -95,57 +93,59 @@ def evaluate_model(data):
     print(f"Random Forest MAE: {model_mae:.2f}")
     print(f"Baseline MAE: {baseline_mae:.2f}")
     print(f"Improvement over baseline: {improvement:.2f}%")
-    print("Note: MAE is an error metric; lower is better.")
+    print("Lower MAE is better.")
+
     return model
 
 
 def save_forecasts(data):
-    """Train on all records and save predictions for the next seven days."""
+    """Generate and save forecasts for the next seven days."""
     model = build_model()
     model.fit(data[FEATURES], data["actual_count"])
 
     last_date = data["date"].max().normalize()
     created_at = datetime.now()
-    forecasts = []
+    count = 0
 
     for offset in range(1, 8):
         date = last_date + timedelta(days=offset)
+        day = date.weekday()
+
         for meal_type, meal_code in MEAL_CODES.items():
-            day = date.weekday()
-            row = pd.DataFrame([{
+            features = pd.DataFrame([{
                 "day_of_week": day,
                 "is_weekend": int(day >= 5),
                 "meal_code": meal_code,
             }])
-            demand = max(0, round(float(model.predict(row)[0])))
 
-            forecasts.append({
+            demand = max(0, round(float(model.predict(features)[0])))
+            forecast = {
                 "target_date": date.to_pydatetime(),
                 "meal_type": meal_type,
                 "predicted_demand": demand,
                 "model_name": MODEL_NAME,
                 "created_at": created_at,
-            })
+            }
 
-    # Replace the matching date/meal forecast, avoiding duplicates.
-    for forecast in forecasts:
-        db.predictions.update_one(
-            {
-                "target_date": forecast["target_date"],
-                "meal_type": forecast["meal_type"],
-                "model_name": MODEL_NAME,
-            },
-            {"$set": forecast},
-            upsert=True,
-        )
+            db.predictions.update_one(
+                {
+                    "target_date": forecast["target_date"],
+                    "meal_type": meal_type,
+                    "model_name": MODEL_NAME,
+                },
+                {"$set": forecast},
+                upsert=True,
+            )
+            count += 1
 
-    print(f"Saved {len(forecasts)} forecasts for seven days.")
+    print(f"Saved {count} forecasts for seven days.")
 
 
 def main():
     data = load_data()
     print(f"Historical attendance records: {len(data)}")
     print(f"Date range: {data['date'].min().date()} to {data['date'].max().date()}")
+
     evaluate_model(data)
     save_forecasts(data)
 
