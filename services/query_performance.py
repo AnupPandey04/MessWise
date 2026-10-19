@@ -1,69 +1,30 @@
-from datetime import datetime
+"""Compare MongoDB's indexed query with a forced collection scan."""
 
+from datetime import datetime
 from database.connection import db
 
 
-def compare_query_plans():
-    query = {
-        "date": {
-            "$gte": datetime(2026, 10, 1)
-        }
-    }
+def explain_query(force_scan=False):
+    query = {"date": {"$gte": datetime(2026, 10, 1)}}
+    find_command = {"find": "meal_records", "filter": query}
 
-    print("\nQUERY PERFORMANCE ANALYSIS")
-    print("=" * 55)
-
-    # Used the database command directly for compatibility
-    result = db.command(
-        "explain",
-        {
-            "find": "meal_records",
-            "filter": query
-        },
-        verbosity="executionStats"
-    )
-
-    stats = result["executionStats"]
-    winning_plan = result["queryPlanner"]["winningPlan"]
-
-    print("\nQuery execution details")
-    print("Winning plan:", winning_plan)
-    print("Documents returned:", stats["nReturned"])
-    print("Keys examined:", stats["totalKeysExamined"])
-    print("Documents examined:", stats["totalDocsExamined"])
-    print("Execution time (ms):", stats["executionTimeMillis"])
-
-
-
-def compare_with_collection_scan():
-    query = {
-        "date": {
-            "$gte": datetime(2026, 10, 1)
-        }
-    }
+    if force_scan:
+        find_command["hint"] = {"$natural": 1}
 
     result = db.command(
         "explain",
-        {
-            "find": "meal_records",
-            "filter": query,
-            "hint": {"$natural": 1}
-        },
-        verbosity="executionStats"
+        find_command,
+        verbosity="executionStats",
     )
-
     stats = result["executionStats"]
-    plan = result["queryPlanner"]["winningPlan"]
 
-    print("\nFORCED COLLECTION SCAN")
-    print("=" * 55)
-    print("Winning plan:", plan)
+    print("Collection scan" if force_scan else "Normal query plan")
     print("Documents returned:", stats["nReturned"])
-    print("Keys examined:", stats["totalKeysExamined"])
     print("Documents examined:", stats["totalDocsExamined"])
+    print("Index keys examined:", stats["totalKeysExamined"])
     print("Execution time (ms):", stats["executionTimeMillis"])
 
 
 if __name__ == "__main__":
-    compare_query_plans()
-    compare_with_collection_scan()
+    explain_query()
+    explain_query(force_scan=True)

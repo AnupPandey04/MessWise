@@ -2,6 +2,7 @@ from database.connection import db
 
 
 def get_meal_summary():
+    """Summarize prepared, served, and leftover meals by meal type."""
     pipeline = [
         {
             "$group": {
@@ -9,10 +10,8 @@ def get_meal_summary():
                 "total_prepared": {"$sum": "$prepared_meals"},
                 "total_served": {"$sum": "$served_meals"},
                 "total_leftovers": {"$sum": "$leftover_meals"},
-                "average_attendance": {
-                    "$avg": "$attendance_count"
-                },
-                "record_count": {"$sum": 1}
+                "average_attendance": {"$avg": "$attendance_count"},
+                "record_count": {"$sum": 1},
             }
         },
         {
@@ -22,9 +21,7 @@ def get_meal_summary():
                 "total_prepared": 1,
                 "total_served": 1,
                 "total_leftovers": 1,
-                "average_attendance": {
-                    "$round": ["$average_attendance", 2]
-                },
+                "average_attendance": {"$round": ["$average_attendance", 2]},
                 "record_count": 1,
                 "leftover_percentage": {
                     "$cond": [
@@ -33,38 +30,32 @@ def get_meal_summary():
                             "$round": [
                                 {
                                     "$multiply": [
-                                        {
-                                            "$divide": [
-                                                "$total_leftovers",
-                                                "$total_prepared"
-                                            ]
-                                        },
-                                        100
+                                        {"$divide": ["$total_leftovers", "$total_prepared"]},
+                                        100,
                                     ]
                                 },
-                                2
+                                2,
                             ]
                         },
-                        0
+                        0,
                     ]
-                }
+                },
             }
         },
-        {"$sort": {"meal_type": 1}}
+        {"$sort": {"meal_type": 1}},
     ]
-
     return list(db.meal_records.aggregate(pipeline))
 
 
-
 def get_waste_by_menu_item():
+    """Join waste logs with menu items and total waste by item."""
     pipeline = [
         {
             "$lookup": {
                 "from": "menu_items",
                 "localField": "item_id",
                 "foreignField": "_id",
-                "as": "menu_item"
+                "as": "menu_item",
             }
         },
         {"$unwind": "$menu_item"},
@@ -73,7 +64,6 @@ def get_waste_by_menu_item():
                 "_id": "$menu_item.item_name",
                 "total_waste_kg": {"$sum": "$quantity_kg"},
                 "waste_events": {"$sum": 1},
-                "average_waste_kg": {"$avg": "$quantity_kg"}
             }
         },
         {
@@ -82,17 +72,15 @@ def get_waste_by_menu_item():
                 "item_name": "$_id",
                 "total_waste_kg": {"$round": ["$total_waste_kg", 2]},
                 "waste_events": 1,
-                "average_waste_kg": {"$round": ["$average_waste_kg", 2]}
             }
         },
-        {"$sort": {"total_waste_kg": -1}}
+        {"$sort": {"total_waste_kg": -1}},
     ]
-
     return list(db.waste_logs.aggregate(pipeline))
 
 
-
 def get_attendance_summary():
+    """Compare expected and actual attendance by meal type."""
     pipeline = [
         {
             "$group": {
@@ -100,7 +88,6 @@ def get_attendance_summary():
                 "total_expected": {"$sum": "$expected_count"},
                 "total_actual": {"$sum": "$actual_count"},
                 "average_actual": {"$avg": "$actual_count"},
-                "records": {"$sum": 1}
             }
         },
         {
@@ -109,57 +96,12 @@ def get_attendance_summary():
                 "meal_type": "$_id",
                 "total_expected": 1,
                 "total_actual": 1,
-                "average_actual": {
-                    "$round": ["$average_actual", 2]
-                },
-                "records": 1,
+                "average_actual": {"$round": ["$average_actual", 2]},
                 "attendance_variance": {
-                    "$subtract": [
-                        "$total_actual",
-                        "$total_expected"
-                    ]
-                }
+                    "$subtract": ["$total_actual", "$total_expected"]
+                },
             }
         },
-        {"$sort": {"meal_type": 1}}
+        {"$sort": {"meal_type": 1}},
     ]
-
     return list(db.attendance.aggregate(pipeline))
-
-
-if __name__ == "__main__":
-    summaries = get_meal_summary()
-
-    print("\nMESSWISE: MEAL SUMMARY")
-    print("=" * 75)
-
-    for summary in summaries:
-        print(f"\nMeal type: {summary['meal_type']}")
-        print(f"Records: {summary['record_count']}")
-        print(f"Total prepared: {summary['total_prepared']}")
-        print(f"Total served: {summary['total_served']}")
-        print(f"Total leftovers: {summary['total_leftovers']}")
-        print(f"Average attendance: {summary['average_attendance']}")
-        print(f"Leftover percentage: {summary['leftover_percentage']}%")
-
-    print("\nWASTE BY MENU ITEM")
-    print("=" * 60)
-
-    for item in get_waste_by_menu_item():
-        print(
-            f"{item['item_name']}: "
-            f"{item['total_waste_kg']} kg across "
-            f"{item['waste_events']} events"
-        )
-
-
-    print("\nATTENDANCE SUMMARY")
-    print("=" * 60)
-
-    for item in get_attendance_summary():
-        print(
-            f"{item['meal_type']}: "
-            f"Expected={item['total_expected']}, "
-            f"Actual={item['total_actual']}, "
-            f"Variance={item['attendance_variance']}"
-        )

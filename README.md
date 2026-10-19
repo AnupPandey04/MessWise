@@ -214,20 +214,26 @@ python -m services.prediction_service
 
 ## Machine-Learning Evaluation
 
-The current sample run reported the following metrics:
+MessWise uses **Random Forest Regression** from scikit-learn to
+forecast meal demand from historical attendance data.
 
-  Metric                                    Reported result
-  ------------------------------ --------------------------
-  Random Forest MAE                                   17.97
-  Historical-mean baseline MAE                        24.66
-  Improvement over baseline                          27.10%
-  Training records                                       69
-  Test records                                           21
-  Test period                      2026-10-12 to 2026-10-18
+The latest recorded sample run produced the following results:
 
-These values are from the current simulated dataset and can change if
-the sample data or model setup changes. They should not be interpreted
-as evidence of performance on real-world mess data.
+| Metric                         | Result                    |
+|--------------------------------|---------------------------|
+| Random Forest MAE              | 18.31                     |
+| Historical-mean baseline MAE   | 24.66                     |
+| Improvement over baseline      | 25.75%                    |
+| Training records               | 69                        |
+| Test records                   | 21                        |
+| Test period                    | 2026-10-12 to 2026-10-18  |
+
+Mean Absolute Error (MAE) measures the average absolute difference
+between predicted and actual attendance. Lower MAE is better.
+
+These results use simulated sample data and a small chronological
+test set. They demonstrate the model workflow and should not be
+interpreted as evidence of real-world forecasting performance.
 
 ## Deployment
 
